@@ -19,14 +19,42 @@ const dayMap: Record<string, Day> = {
     sat: 6
 };
 
-function getTargetDay(dayStr: string): Day | undefined {
+// Helper to parse dates like "Mon 23rd Feb" or fallback to next matching weekday
+function parseDateString(dayStr: string): Date {
+    const now = new Date();
+    const currentYear = now.getFullYear();
     const normalized = dayStr.toLowerCase().trim();
+
+    // Try parsing specific date patterns like "23rd Feb" or "Feb 23"
+    // Remove ordinal suffixes
+    const cleanStr = normalized.replace(/(st|nd|rd|th)/g, "");
+
+    // Attempt standard Date parsing first with the current year appended
+    const parsedDate = new Date(`${cleanStr} ${currentYear}`);
+
+    if (!isNaN(parsedDate.getTime())) {
+        // If the parsed date is more than 6 months in the past, it might be for next year
+        if (parsedDate.getTime() < now.getTime() - 1000 * 60 * 60 * 24 * 180) {
+            parsedDate.setFullYear(currentYear + 1);
+        }
+        return parsedDate;
+    }
+
+    // Fallback: If it's just a day name (e.g. "Monday"), find the next occurrence
+    let targetDay: Day | undefined = undefined;
     for (const [key, val] of Object.entries(dayMap)) {
         if (normalized.includes(key)) {
-            return val;
+            targetDay = val;
+            break;
         }
     }
-    return undefined;
+
+    if (targetDay !== undefined) {
+        return nextDay(now, targetDay);
+    }
+
+    // Ultimate fallback
+    return now;
 }
 
 function parseTime(timeStr: string): { hours: number; minutes: number } | null {
@@ -59,10 +87,7 @@ export function generateICSBlob(entries: ScheduleEntry[]): Blob | null {
 
     for (const entry of entries) {
         const dayStr = entry.day;
-        const targetDay = getTargetDay(dayStr);
-
-        // Fallback if day is unrecognizable - we fallback to today but preferably we ignore it
-        const occurrence = targetDay !== undefined ? nextDay(now, targetDay) : now;
+        const occurrence = parseDateString(dayStr);
 
         const startParse = parseTime(entry.startTime);
         const endParse = parseTime(entry.endTime);
@@ -89,7 +114,6 @@ export function generateICSBlob(entries: ScheduleEntry[]): Blob | null {
             ],
             title: `${entry.subject} (Section ${entry.section})`,
             description: `Class scheduled for section ${entry.section}`,
-            recurrenceRule: `FREQ=WEEKLY;INTERVAL=1;COUNT=15`,
         });
     }
 
@@ -106,10 +130,8 @@ export function generateICSBlob(entries: ScheduleEntry[]): Blob | null {
 }
 
 export function generateGoogleCalendarUrl(entry: ScheduleEntry): string | null {
-    const now = new Date();
     const dayStr = entry.day;
-    const targetDay = getTargetDay(dayStr);
-    const occurrence = targetDay !== undefined ? nextDay(now, targetDay) : now;
+    const occurrence = parseDateString(dayStr);
 
     const startParse = parseTime(entry.startTime);
     const endParse = parseTime(entry.endTime);
@@ -125,7 +147,7 @@ export function generateGoogleCalendarUrl(entry: ScheduleEntry): string | null {
     const formatGcalDate = (d: Date) => d.toISOString().replace(/-|:|\.\d\d\d/g, '');
 
     const details = encodeURIComponent(`Section ${entry.section}`);
-    const url = `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(entry.subject)}&dates=${formatGcalDate(startD)}/${formatGcalDate(endD)}&details=${details}&recur=RRULE:FREQ=WEEKLY;COUNT=15`;
+    const url = `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(entry.subject)}&dates=${formatGcalDate(startD)}/${formatGcalDate(endD)}&details=${details}`;
 
     return url;
 }
